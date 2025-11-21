@@ -6,6 +6,7 @@ CCHM CLI - A minimal Chromecast-like screen sharing application using aiortc
 import argparse
 import asyncio
 import logging
+import socket
 
 import cv2
 import numpy as np
@@ -17,6 +18,17 @@ import mss
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def get_local_ip():
+    """Get the local IP address that can be used by other machines"""
+    try:
+        # Connect to a remote address to find local IP
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
 
 
 class ScreenCaptureTrack(VideoStreamTrack):
@@ -87,7 +99,7 @@ class ScreencastSender:
                     logger.error("Failed to connect to receiver!")
                 elif self.pc.connectionState == "disconnected":
                     logger.info("Disconnected from receiver")
-        
+
         self.pc.on("connectionstatechange", handle_connection_state_change)
 
         try:
@@ -147,7 +159,7 @@ class ScreencastReceiver:
     async def handle_offer(self, request):
         """Handle WebRTC offer from sender"""
         data = await request.json()
-        
+
         pc = RTCPeerConnection()
         self.pcs.add(pc)
 
@@ -171,7 +183,7 @@ class ScreencastReceiver:
             elif pc.connectionState == "closed":
                 logger.info("WebRTC connection closed")
                 self.pcs.discard(pc)
-        
+
         # Register event handlers
         pc.on("track", handle_received_track)
         pc.on("connectionstatechange", handle_connection_state_change)
@@ -179,7 +191,7 @@ class ScreencastReceiver:
         # Set remote description from sender's offer
         offer = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
         await pc.setRemoteDescription(offer)
-        
+
         # Create answer
         answer = await pc.createAnswer()
         await pc.setLocalDescription(answer)
@@ -191,8 +203,6 @@ class ScreencastReceiver:
             }
         )
 
-
-
     async def start_listening(self):
         """Start the receiver server and wait for sender connections"""
         app = web.Application()
@@ -200,11 +210,13 @@ class ScreencastReceiver:
 
         runner = web.AppRunner(app)
         await runner.setup()
-        site = web.TCPSite(runner, "localhost", self.port)
+        site = web.TCPSite(runner, "0.0.0.0", self.port)
         await site.start()
 
-        logger.info(f"Receiver listening on port {self.port}")
-        logger.info(f"Senders should connect to: http://localhost:{self.port}")
+        local_ip = get_local_ip()
+        logger.info(f"Receiver listening on all interfaces, port {self.port}")
+        logger.info(f"Local network: http://{local_ip}:{self.port}")
+        logger.info(f"Localhost: http://localhost:{self.port}")
         logger.info("Press Ctrl+C to stop listening")
 
         try:
@@ -437,16 +449,29 @@ def main():
     # Send command
     send_parser = subparsers.add_parser("send", help="Send/share your screen")
     send_parser.add_argument(
-        "-u", "--url", default="http://localhost:8080", help="URL of the receiver to connect to"
+        "-u",
+        "--url",
+        default="http://localhost:8080",
+        help="URL of the receiver (e.g., http://192.168.1.100:8080)",
     )
     send_parser.add_argument(
-        "-m", "--monitor", type=int, default=1, help="Monitor ID to capture (1 for primary)"
+        "-m",
+        "--monitor",
+        type=int,
+        default=1,
+        help="Monitor ID to capture (1 for primary)",
     )
 
     # Receive command
-    receive_parser = subparsers.add_parser("receive", help="Receive and display screencast")
+    receive_parser = subparsers.add_parser(
+        "receive", help="Receive and display screencast"
+    )
     receive_parser.add_argument(
-        "-p", "--port", type=int, default=8080, help="Port to listen on for sender connections"
+        "-p",
+        "--port",
+        type=int,
+        default=8080,
+        help="Port to listen on for sender connections",
     )
 
     # Monitors command
