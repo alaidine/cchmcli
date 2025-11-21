@@ -11,14 +11,14 @@ A minimal CLI tool for screencasting using aiortc WebRTC
 
 ## Usage
 
-### Send (Share your screen)
+### Receive (Start listening for screen shares)
 ```bash
-uv run main.py send --port 8080 --monitor 1
+uv run main.py receive --port 8080
 ```
 
-### Receive (View shared screen)
+### Send (Connect and share your screen)
 ```bash
-uv run main.py receive --url http://localhost:8080
+uv run main.py send --url http://localhost:8080 --monitor 1
 ```
 
 ### List monitors
@@ -38,16 +38,16 @@ uv sync
 - opencv-python (video display)
 - mss (screen capture)
 - aiohttp (web server)
-- click (CLI framework)
 - numpy (array processing)
 
 ## How it works
 
-1. **Sender**: Captures screen using `mss` and streams via WebRTC using `aiortc`
-2. **Receiver**: Connects to sender via WebRTC and displays video using OpenCV
-3. **Signaling**: Simple HTTP server handles WebRTC offer/answer exchange
+1. **Receiver**: Starts HTTP server and waits for sender connections
+2. **Sender**: Captures screen using `mss` and connects to receiver via WebRTC using `aiortc`
+3. **Display**: Receiver displays incoming video using OpenCV
+4. **Signaling**: HTTP server handles WebRTC offer/answer exchange
 
 ## Testing
 
-1. Start sender: `uv run main.py send`
-2. Start receiver: `uv run main.py receive`
+1. Start receiver (listener): `uv run main.py receive`
+2. Start sender (connects to receiver): `uv run main.py send`

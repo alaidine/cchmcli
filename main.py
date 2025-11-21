@@ -3,10 +3,10 @@
 CCHM CLI - A minimal Chromecast-like screen sharing application using aiortc
 """
 
+import argparse
 import asyncio
 import logging
 
-import click
 import cv2
 import numpy as np
 from aiohttp import web
@@ -60,33 +60,129 @@ class ScreenCaptureTrack(VideoStreamTrack):
 
 
 class ScreencastSender:
-    """Handles the sender side of screencasting"""
+    """Handles the sender side of screencasting - connects to receiver"""
 
-    def __init__(self, port: int = 8080, monitor_id: int = 1):
-        self.port = port
+    def __init__(self, receiver_url: str, monitor_id: int = 1):
+        self.receiver_url = receiver_url
         self.monitor_id = monitor_id
-        self.pcs = set()  # Track peer connections
+        self.pc = None
         self.screen_track = None
 
-    async def create_offer(self, request):
-        """Create WebRTC offer"""
-        pc = RTCPeerConnection()
-        self.pcs.add(pc)
+    async def connect_and_send(self):
+        """Connect to receiver and start sending screencast"""
+        self.pc = RTCPeerConnection()
 
         # Add screen capture track
         if not self.screen_track:
             self.screen_track = ScreenCaptureTrack(self.monitor_id)
-        pc.addTrack(self.screen_track)
+        self.pc.addTrack(self.screen_track)
 
-        @pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            logger.info(f"Connection state is {pc.connectionState}")
-            if pc.connectionState == "failed" or pc.connectionState == "closed":
+        # Handle connection state changes
+        def handle_connection_state_change():
+            if self.pc:
+                logger.info(f"Sender connection state: {self.pc.connectionState}")
+                if self.pc.connectionState == "connected":
+                    logger.info("Successfully sending screen to receiver!")
+                elif self.pc.connectionState == "failed":
+                    logger.error("Failed to connect to receiver!")
+                elif self.pc.connectionState == "disconnected":
+                    logger.info("Disconnected from receiver")
+        
+        self.pc.on("connectionstatechange", handle_connection_state_change)
+
+        try:
+            # Create offer and send to receiver
+            import aiohttp
+
+            # Create offer
+            offer = await self.pc.createOffer()
+            await self.pc.setLocalDescription(offer)
+
+            async with aiohttp.ClientSession() as session:
+                # Send offer to receiver and get answer
+                async with session.post(
+                    f"{self.receiver_url}/offer",
+                    json={
+                        "sdp": self.pc.localDescription.sdp,
+                        "type": self.pc.localDescription.type,
+                    },
+                ) as response:
+                    answer_data = await response.json()
+                    answer = RTCSessionDescription(
+                        sdp=answer_data["sdp"], type=answer_data["type"]
+                    )
+                    await self.pc.setRemoteDescription(answer)
+
+            logger.info("Connected to receiver, sending screen...")
+            logger.info("Press Ctrl+C to stop sending")
+
+            # Keep the connection alive
+            connection_time = 0
+            try:
+                while True:
+                    await asyncio.sleep(1)
+                    connection_time += 1
+
+                    if connection_time % 30 == 0:  # Every 30 seconds
+                        if self.pc:
+                            logger.info(
+                                f"Still sending ({connection_time}s) - Connection state: {self.pc.connectionState}"
+                            )
+
+            except KeyboardInterrupt:
+                logger.info("Stopping sender...")
+
+        finally:
+            if self.pc:
+                await self.pc.close()
+
+
+class ScreencastReceiver:
+    """Handles the receiver side of screencasting - waits for sender connections"""
+
+    def __init__(self, port: int = 8080):
+        self.port = port
+        self.pcs = set()  # Track peer connections
+
+    async def handle_offer(self, request):
+        """Handle WebRTC offer from sender"""
+        data = await request.json()
+        
+        pc = RTCPeerConnection()
+        self.pcs.add(pc)
+
+        # Handle incoming video/audio tracks
+        async def handle_received_track(track):
+            logger.info(f"Received track: {track.kind}")
+            if track.kind == "video":
+                logger.info("Video track received, starting video handler...")
+                await self._handle_video_track(track)
+            else:
+                logger.info(f"Received non-video track: {track.kind}")
+
+        # Handle WebRTC connection state changes
+        def handle_connection_state_change():
+            logger.info(f"Receiver connection state: {pc.connectionState}")
+            if pc.connectionState == "connected":
+                logger.info("WebRTC connection established! Receiving video...")
+            elif pc.connectionState == "failed":
+                logger.error("WebRTC connection failed!")
                 self.pcs.discard(pc)
+            elif pc.connectionState == "closed":
+                logger.info("WebRTC connection closed")
+                self.pcs.discard(pc)
+        
+        # Register event handlers
+        pc.on("track", handle_received_track)
+        pc.on("connectionstatechange", handle_connection_state_change)
 
-        # Create offer
-        offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)
+        # Set remote description from sender's offer
+        offer = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
+        await pc.setRemoteDescription(offer)
+        
+        # Create answer
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
 
         return web.json_response(
             {
@@ -95,133 +191,36 @@ class ScreencastSender:
             }
         )
 
-    async def handle_answer(self, request):
-        """Handle WebRTC answer"""
-        data = await request.json()
 
-        # Find the corresponding peer connection (simplified - in production use proper matching)
-        if self.pcs:
-            pc = list(self.pcs)[-1]  # Use the most recent connection
-            answer = RTCSessionDescription(sdp=data["sdp"], type=data["type"])
-            await pc.setRemoteDescription(answer)
 
-        return web.json_response({"status": "ok"})
-
-    async def start_server(self):
-        """Start the WebRTC signaling server"""
+    async def start_listening(self):
+        """Start the receiver server and wait for sender connections"""
         app = web.Application()
-        app.router.add_get("/offer", self.create_offer)
-        app.router.add_post("/answer", self.handle_answer)
+        app.router.add_post("/offer", self.handle_offer)
 
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "localhost", self.port)
         await site.start()
 
-        logger.info(f"WebRTC signaling server started on port {self.port}")
-        logger.info(f"Receiver can connect to: http://localhost:{self.port}")
+        logger.info(f"Receiver listening on port {self.port}")
+        logger.info(f"Senders should connect to: http://localhost:{self.port}")
+        logger.info("Press Ctrl+C to stop listening")
 
         try:
             while True:
                 await asyncio.sleep(1)
         except KeyboardInterrupt:
-            logger.info("Shutting down...")
+            logger.info("Shutting down receiver...")
         finally:
             # Close all peer connections
             for pc in self.pcs:
                 await pc.close()
             await runner.cleanup()
 
-
-class ScreencastReceiver:
-    """Handles the receiver side of screencasting"""
-
-    def __init__(self, sender_url: str):
-        self.sender_url = sender_url
-        self.pc = None
-
-    async def connect_and_receive(self):
-        """Connect to sender and start receiving screencast"""
-        self.pc = RTCPeerConnection()
-
-        @self.pc.on("track")
-        async def on_track(track):
-            logger.info(f"Received track: {track.kind}")
-            if track.kind == "video":
-                logger.info("Video track received, starting video handler...")
-                await self._handle_video_track(track)
-            else:
-                logger.info(f"Received non-video track: {track.kind}")
-
-        @self.pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            if self.pc:
-                logger.info(f"Connection state changed to: {self.pc.connectionState}")
-                if self.pc.connectionState == "connected":
-                    logger.info("WebRTC connection established!")
-                elif self.pc.connectionState == "failed":
-                    logger.error("WebRTC connection failed!")
-                elif self.pc.connectionState == "disconnected":
-                    logger.info("WebRTC connection disconnected")
-
-        try:
-            # Get offer from sender
-            import aiohttp
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{self.sender_url}/offer") as response:
-                    offer_data = await response.json()
-                    offer = RTCSessionDescription(
-                        sdp=offer_data["sdp"], type=offer_data["type"]
-                    )
-
-                await self.pc.setRemoteDescription(offer)
-                answer = await self.pc.createAnswer()
-                await self.pc.setLocalDescription(answer)
-
-                # Send answer back to sender
-                async with session.post(
-                    f"{self.sender_url}/answer",
-                    json={
-                        "sdp": self.pc.localDescription.sdp,
-                        "type": self.pc.localDescription.type,
-                    },
-                ) as response:
-                    await response.json()
-
-            logger.info("Connected to sender, waiting for video stream...")
-            logger.info("Waiting for video track... (this may take a few seconds)")
-
-            # Keep the connection alive and show status
-            connection_time = 0
-            try:
-                while True:
-                    await asyncio.sleep(1)
-                    connection_time += 1
-
-                    if connection_time % 10 == 0:  # Every 10 seconds
-                        logger.info(
-                            f"Still connected ({connection_time}s) - Connection state: {self.pc.connectionState}"
-                        )
-
-                    if connection_time > 60:  # After 60 seconds
-                        logger.warning(
-                            "No video received after 60 seconds. Check if sender is working properly."
-                        )
-                        logger.info(
-                            "Try connecting with another receiver to verify sender is working"
-                        )
-
-            except KeyboardInterrupt:
-                logger.info("Shutting down receiver...")
-
-        finally:
-            if self.pc:
-                await self.pc.close()
-
     async def _handle_video_track(self, track):
         """Handle incoming video track using OpenCV display instead of VLC"""
-        logger.info(f"Received video track, starting OpenCV display...")
+        logger.info("Received video track, starting OpenCV display...")
 
         try:
             import cv2
@@ -405,46 +404,64 @@ class ScreencastReceiver:
             logger.error(f"Error in video display: {e}")
 
 
-@click.group()
-def cli():
-    """CCHM CLI - Chromecast-like screen sharing using WebRTC"""
-    pass
-
-
-@cli.command()
-@click.option("--port", "-p", default=8080, help="Port to run the sender server on")
-@click.option(
-    "--monitor", "-m", default=1, help="Monitor ID to capture (1 for primary)"
-)
-def send(port: int, monitor: int):
+def send(url: str, monitor: int):
     """Send/share your screen (sender mode)"""
-    sender = ScreencastSender(port, monitor)
-    asyncio.run(sender.start_server())
+    sender = ScreencastSender(url, monitor)
+    asyncio.run(sender.connect_and_send())
 
 
-@cli.command()
-@click.option("--url", "-u", default="http://localhost:8080", help="URL of the sender")
-def receive(url: str):
+def receive(port: int):
     """Receive and display screencast (receiver mode)"""
-    receiver = ScreencastReceiver(url)
-    asyncio.run(receiver.connect_and_receive())
+    receiver = ScreencastReceiver(port)
+    asyncio.run(receiver.start_listening())
 
 
-@cli.command()
 def monitors():
     """List available monitors for screen capture"""
     sct = mss.mss()
-    click.echo("Available monitors:")
+    print("Available monitors:")
     for i, monitor in enumerate(sct.monitors):
         if i == 0:
-            click.echo(f"  {i}: All monitors combined")
+            print(f"  {i}: All monitors combined")
         else:
-            click.echo(f"  {i}: Monitor {i} - {monitor['width']}x{monitor['height']}")
+            print(f"  {i}: Monitor {i} - {monitor['width']}x{monitor['height']}")
 
 
 def main():
     """Main entry point"""
-    cli()
+    parser = argparse.ArgumentParser(
+        description="CCHM CLI - Chromecast-like screen sharing using WebRTC"
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Send command
+    send_parser = subparsers.add_parser("send", help="Send/share your screen")
+    send_parser.add_argument(
+        "-u", "--url", default="http://localhost:8080", help="URL of the receiver to connect to"
+    )
+    send_parser.add_argument(
+        "-m", "--monitor", type=int, default=1, help="Monitor ID to capture (1 for primary)"
+    )
+
+    # Receive command
+    receive_parser = subparsers.add_parser("receive", help="Receive and display screencast")
+    receive_parser.add_argument(
+        "-p", "--port", type=int, default=8080, help="Port to listen on for sender connections"
+    )
+
+    # Monitors command
+    subparsers.add_parser("monitors", help="List available monitors for screen capture")
+
+    args = parser.parse_args()
+
+    if args.command == "send":
+        send(args.url, args.monitor)
+    elif args.command == "receive":
+        receive(args.port)
+    elif args.command == "monitors":
+        monitors()
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
