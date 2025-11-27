@@ -2,6 +2,9 @@
 
 A minimal CLI tool for screencasting using aiortc WebRTC
 
+Requires Python 3.8+
+Requires `uv` (Unicorn Velocity) for dependency management
+
 ## Features
 
 - Screen capture and sharing using WebRTC (aiortc)

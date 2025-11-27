@@ -452,7 +452,7 @@ def main():
         "-u",
         "--url",
         default="http://localhost:8080",
-        help="URL of the receiver (e.g., http://192.168.1.100:8080)",
+        help="URL of the receiver (e.g., http://<ip-address>:8080)",
     )
     send_parser.add_argument(
         "-m",
