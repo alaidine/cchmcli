@@ -448,8 +448,8 @@ class VideoClient(StreamingClient):
         """
         Set video resolution and encoding parameters.
         """
-        self.__video.set(3, 1920)
-        self.__video.set(4, 1080)
+        self.__video.set(3, 1024)
+        self.__video.set(4, 576)
         super(VideoClient, self)._configure()
 
     def _get_frame(self):
