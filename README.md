@@ -6,12 +6,10 @@ A screen casting tool written in Python. Stream your screen from one computer to
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- Windows (for full cursor capture support)
 
 ## Features
 
 - **Screen Sharing** - Stream your entire screen to another computer
-- **Cursor Capture** - Shows your actual system cursor on Windows (pointer, text cursor, resize handles, etc.) or a generic arrow on Linux/macOS
 - **Camera Streaming** - Stream from your webcam
 - **Video Streaming** - Stream video files
 - **Simple CLI Interface** - Easy to use command-line tools
@@ -24,7 +22,7 @@ A screen casting tool written in Python. Stream your screen from one computer to
 |-------|-------------|
 | `StreamingServer` | TCP server that receives and displays video streams. Handles multiple client connections with slot management. |
 | `StreamingClient` | Abstract base class for all streaming clients. Handles connection, encoding, and transmission. |
-| `ScreenShareClient` | Captures screen using `pyautogui`, overlays the system cursor, and streams to server. |
+| `ScreenShareClient` | Captures screen using `pyautogui`, overlays streams to server. |
 | `CameraClient` | Captures video from webcam using OpenCV and streams to server. |
 | `VideoClient` | Streams a video file to the server with optional looping. |
 
@@ -124,7 +122,6 @@ Contributions are welcome! Here's how to get started:
 |-------|----------|
 | Connection refused | Ensure firewall allows the port, and both machines are on the same network |
 | Black screen | Check that the sender resolution matches your display |
-| Cursor not showing actual cursor | Full cursor capture is Windows-only; Linux/macOS shows a generic arrow pointer |
 | High latency | Try lowering the resolution (e.g., 1280x720) |
 
 ## Dependencies
@@ -132,7 +129,7 @@ Contributions are welcome! Here's how to get started:
 - **opencv-python** - Video capture and image processing
 - **pyautogui** - Screen capture and mouse position
 - **numpy** - Array operations for frame manipulation
-- **pywin32** - Windows API for cursor capture (Windows only, installed automatically)
+- **pywin32** - For windows related stuff
 - **pillow** - Image processing support
 
 ## License
