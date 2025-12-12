@@ -1,6 +1,12 @@
 # CCHM - Chrome Cast Home Made
 
-A lightweight, cross-network screen casting CLI tool written in Python. Stream your screen from one computer to another over your local network with real-time cursor capture.
+A screen casting tool written in Python. Stream your screen from one computer to another over your local network.
+
+## Requirements
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- Windows (for full cursor capture support)
 
 ## Features
 
@@ -12,32 +18,6 @@ A lightweight, cross-network screen casting CLI tool written in Python. Stream y
 - **LAN Support** - Works across different machines on the same network
 - **Cross-Platform** - Works on Windows and Linux
 
-## Architecture
-
-```
-┌──────────────────┐                    ┌─────────────────┐
-│     SENDER       │                    │    RECEIVER     │
-│  (sender.py)     │ ──── TCP/IP ────▶  │  (receiver.py)  │
-│                  │                    │                 │
-│ ScreenShareClient│                    │ StreamingServer │
-│ - Captures screen│                    │ - Listens for   │
-│ - Captures cursor│                    │   connections   │
-│ - Encodes frames │                    │ - Decodes frames│
-│ - Sends via TCP  │                    │ - Displays video│
-└──────────────────┘                    └─────────────────┘
-```
-
-### Project Structure
-
-```
-cchmcli/
-├── streaming.py      # Core streaming library with all client/server classes
-├── sender.py         # CLI tool to start screen sharing (client)
-├── receiver.py       # CLI tool to receive and display stream (server)
-├── pyproject.toml    # Project dependencies and metadata
-└── README.md         # This file
-```
-
 ### Core Components (`streaming.py`)
 
 | Class | Description |
@@ -47,12 +27,6 @@ cchmcli/
 | `ScreenShareClient` | Captures screen using `pyautogui`, overlays the system cursor, and streams to server. |
 | `CameraClient` | Captures video from webcam using OpenCV and streams to server. |
 | `VideoClient` | Streams a video file to the server with optional looping. |
-
-## Requirements
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
-- Windows (for full cursor capture support)
 
 ## Installation
 
