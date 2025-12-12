@@ -43,7 +43,7 @@ A screen casting tool written in Python. Stream your screen from one computer to
 
    Or using pip:
    ```bash
-   pip install -e .
+   pip install -r requirements.txt
    ```
 
 ## Usage
@@ -105,36 +105,11 @@ Contributions are welcome! Here's how to get started:
 1. Fork and clone the repository
 2. Install development dependencies:
    ```bash
+   # Using uv
    uv sync
+   # Or using pip
+   pip install -r requirements.txt
    ```
-
-### Code Overview for Contributors
-
-**Adding a new streaming client type:**
-
-1. Create a new class that extends `StreamingClient`
-2. Override `_configure()` for setup (optional)
-3. Override `_get_frame()` to return frames as numpy arrays
-4. Override `_cleanup()` for resource cleanup (optional)
-
-Example:
-```python
-class MyCustomClient(StreamingClient):
-    def __init__(self, host, port):
-        super().__init__(host, port)
-    
-    def _get_frame(self):
-        # Return a numpy array (BGR format)
-        frame = ...  # Your frame capture logic
-        return frame
-```
-
-**Key implementation details:**
-
-- Frames are JPEG-encoded before transmission for bandwidth efficiency
-- Protocol uses `struct` for message size headers (big-endian unsigned long)
-- Data is serialized with `pickle` for transmission
-- The server uses threading for handling multiple clients
 
 ### Guidelines
 
