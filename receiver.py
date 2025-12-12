@@ -1,4 +1,4 @@
-from vidstream import StreamingServer
+from streaming import StreamingServer
 import threading
 import argparse
 import socket

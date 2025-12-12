@@ -6,6 +6,14 @@ import socket
 import pickle
 import struct
 import threading
+import platform
+
+# Windows-specific imports for cursor capture
+if platform.system() == 'Windows':
+    import win32gui
+    import win32ui
+    import win32con
+    import win32api
 
 
 class StreamingServer:
@@ -541,5 +549,145 @@ class ScreenShareClient(StreamingClient):
         screen = pyautogui.screenshot()
         frame = np.array(screen)
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Draw the cursor based on platform
+        if platform.system() == 'Windows':
+            frame = self._draw_windows_cursor(frame)
+        else:
+            frame = self._draw_fallback_cursor(frame)
+        
         frame = cv2.resize(frame, (self.__x_res, self.__y_res), interpolation=cv2.INTER_AREA)
+        return frame
+
+    def _draw_fallback_cursor(self, frame):
+        """
+        Draws a simple cursor pointer for non-Windows platforms.
+        
+        Parameters
+        ----------
+        frame : numpy array
+            The screenshot frame to draw the cursor on
+            
+        Returns
+        -------
+        frame : numpy array
+            The frame with the cursor drawn on it
+        """
+        mouse_x, mouse_y = pyautogui.position()
+        
+        # Draw a cursor pointer (arrow shape)
+        cursor_size = 20
+        
+        # Arrow pointer vertices
+        pts = np.array([
+            [mouse_x, mouse_y],
+            [mouse_x, mouse_y + cursor_size],
+            [mouse_x + cursor_size // 3, mouse_y + cursor_size * 2 // 3],
+            [mouse_x + cursor_size // 2, mouse_y + cursor_size],
+            [mouse_x + cursor_size * 2 // 3, mouse_y + cursor_size * 2 // 3],
+            [mouse_x + cursor_size, mouse_y + cursor_size // 2],
+        ], np.int32)
+        
+        # Simple arrow (just the main pointer part)
+        simple_pts = np.array([
+            [mouse_x, mouse_y],
+            [mouse_x, mouse_y + cursor_size],
+            [mouse_x + cursor_size * 2 // 5, mouse_y + cursor_size * 3 // 5],
+        ], np.int32)
+        simple_pts = simple_pts.reshape((-1, 1, 2))
+        
+        # Draw white fill with black outline
+        cv2.fillPoly(frame, [simple_pts], (255, 255, 255))
+        cv2.polylines(frame, [simple_pts], True, (0, 0, 0), 1, cv2.LINE_AA)
+        
+        return frame
+
+    def _draw_windows_cursor(self, frame):
+        """
+        Draws the actual Windows system cursor onto the frame.
+        
+        Parameters
+        ----------
+        frame : numpy array
+            The screenshot frame to draw the cursor on
+            
+        Returns
+        -------
+        frame : numpy array
+            The frame with the cursor drawn on it
+        """
+        try:
+            # Get cursor info
+            cursor_info = win32gui.GetCursorInfo()
+            cursor_handle = cursor_info[1]
+            cursor_x, cursor_y = cursor_info[2]
+            
+            # Get icon info to find the hotspot
+            icon_info = win32gui.GetIconInfo(cursor_handle)
+            hotspot_x = icon_info[1]
+            hotspot_y = icon_info[2]
+            
+            # Clean up bitmaps from GetIconInfo
+            if icon_info[3]:
+                win32gui.DeleteObject(icon_info[3])
+            if icon_info[4]:
+                win32gui.DeleteObject(icon_info[4])
+            
+            # Create a device context and bitmap to draw the cursor
+            cursor_size = 32
+            
+            # Create device contexts
+            hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+            hdc_mem = hdc.CreateCompatibleDC()
+            
+            # Create bitmap
+            hbmp = win32ui.CreateBitmap()
+            hbmp.CreateCompatibleBitmap(hdc, cursor_size, cursor_size)
+            hdc_mem.SelectObject(hbmp)
+            
+            # Fill with transparent color (magenta as key)
+            hdc_mem.FillSolidRect((0, 0, cursor_size, cursor_size), 0xFF00FF)
+            
+            # Draw the cursor onto the bitmap
+            win32gui.DrawIconEx(
+                hdc_mem.GetSafeHdc(), 0, 0, cursor_handle,
+                cursor_size, cursor_size, 0, None, win32con.DI_NORMAL
+            )
+            
+            # Convert bitmap to numpy array
+            bmp_info = hbmp.GetInfo()
+            bmp_bits = hbmp.GetBitmapBits(True)
+            cursor_img = np.frombuffer(bmp_bits, dtype=np.uint8)
+            cursor_img = cursor_img.reshape((bmp_info['bmHeight'], bmp_info['bmWidth'], 4))
+            
+            # Clean up
+            hdc_mem.DeleteDC()
+            win32gui.ReleaseDC(0, hdc.GetSafeHdc())
+            win32gui.DeleteObject(hbmp.GetHandle())
+            
+            # Create mask (magenta = transparent)
+            mask = ~((cursor_img[:, :, 0] == 0xFF) & 
+                     (cursor_img[:, :, 1] == 0x00) & 
+                     (cursor_img[:, :, 2] == 0xFF))
+            
+            # Calculate position adjusted for hotspot
+            draw_x = cursor_x - hotspot_x
+            draw_y = cursor_y - hotspot_y
+            
+            # Overlay cursor on frame
+            for y in range(cursor_size):
+                for x in range(cursor_size):
+                    frame_x = draw_x + x
+                    frame_y = draw_y + y
+                    if (0 <= frame_x < frame.shape[1] and 
+                        0 <= frame_y < frame.shape[0] and mask[y, x]):
+                        # BGR from cursor to RGB frame
+                        frame[frame_y, frame_x] = cursor_img[y, x, :3]
+                        
+        except Exception as e:
+            # Fallback: draw a simple cursor if Windows API fails
+            mouse_x, mouse_y = pyautogui.position()
+            cv2.circle(frame, (mouse_x, mouse_y), 5, (255, 255, 255), -1)
+            cv2.circle(frame, (mouse_x, mouse_y), 5, (0, 0, 0), 1)
+            
         return frame

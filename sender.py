@@ -1,4 +1,4 @@
-from vidstream import ScreenShareClient
+from streaming import ScreenShareClient
 import argparse
 
 parser = argparse.ArgumentParser(
